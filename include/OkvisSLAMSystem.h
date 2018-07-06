@@ -6,6 +6,7 @@
 #include <thread>
 #include <opencv2/core/eigen.hpp>
 #include "SingleConsumerPriorityQueue.h"
+#include <atomic>
 
 namespace ark {
     /** Okvis-based SLAM system */
@@ -84,6 +85,7 @@ namespace ark {
         std::thread keyFrameConsumerThread_;
         std::thread frameConsumerThread_;
         int num_frames_;
+        std::atomic<bool> kill;
 
     }; // OkvisSLAMSystem
 

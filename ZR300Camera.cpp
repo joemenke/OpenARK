@@ -4,6 +4,21 @@
 #include "Visualizer.h"
 
 namespace ark {
+    //These write and read functions must be defined for the serialization in FileStorage to work
+    static void write(cv::FileStorage& fs, const std::string&, const ZR300Camera::CameraCalibration& x)
+    {
+        x.write(fs);
+    }
+
+    static void read(const cv::FileNode& node, ZR300Camera::CameraCalibration& x, const ZR300Camera::CameraCalibration& default_value = ZR300Camera::CameraCalibration()){
+    if(node.empty())
+        x = default_value;
+    else
+        x.read(node);
+    }
+
+
+
     ZR300Camera::ZR300Camera(bool require_motion) :
         mTimeStamp(0), mTimeImu(0), requireMotion(require_motion) {
         rs::log_to_console(rs::log_severity::warn);
@@ -107,6 +122,42 @@ namespace ark {
         mDepth_intrin = mpDev->get_stream_intrinsics(rs::stream::depth);
         mColor_intrin = mpDev->get_stream_intrinsics(rs::stream::color);
         
+
+        rs::intrinsics intr_fish = mpDev->get_stream_intrinsics(rs::stream::fisheye);
+        rs::extrinsics extr_imu_fisheye = mpDev->get_motion_extrinsics_from(rs::stream::fisheye);
+        rs::extrinsics extr_depth = mpDev->get_extrinsics(rs::stream::fisheye, rs::stream::depth);
+        rs::extrinsics extr_color = mpDev->get_extrinsics(rs::stream::fisheye, rs::stream::color);
+
+        Eigen::Matrix4f tf_fish_depth;
+        tf_fish_depth << extr_depth.rotation[0], extr_depth.rotation[1], extr_depth.rotation[2], extr_depth.translation[0],
+                        extr_depth.rotation[3], extr_depth.rotation[4], extr_depth.rotation[5], extr_depth.translation[1],
+                        extr_depth.rotation[6], extr_depth.rotation[7], extr_depth.rotation[8], extr_depth.translation[2],
+                        0,0,0,1;
+
+        Eigen::Matrix4f tf_fish_color;
+        tf_fish_color << extr_color.rotation[0], extr_color.rotation[1], extr_color.rotation[2], extr_color.translation[0],
+                        extr_color.rotation[3], extr_color.rotation[4], extr_color.rotation[5], extr_color.translation[1],
+                        extr_color.rotation[6], extr_color.rotation[7], extr_color.rotation[8], extr_color.translation[2],
+                        0,0,0,1;
+
+        Eigen::Matrix4f tf_imu_fish;
+        tf_imu_fish << extr_imu_fisheye.rotation[0], extr_imu_fisheye.rotation[1], extr_imu_fisheye.rotation[2], extr_imu_fisheye.translation[0],
+                        extr_imu_fisheye.rotation[3], extr_imu_fisheye.rotation[4], extr_imu_fisheye.rotation[5], extr_imu_fisheye.translation[1],
+                        extr_imu_fisheye.rotation[6], extr_imu_fisheye.rotation[7], extr_imu_fisheye.rotation[8], extr_imu_fisheye.translation[2],
+                        0,0,0,1;
+
+        Eigen::Matrix4f tf_imu_depth = tf_imu_fish.inverse()*tf_fish_depth;
+        Eigen::Matrix4f tf_imu_color = tf_imu_fish.inverse()*tf_fish_color;
+
+        CameraCalibration depth_calib(tf_imu_depth.transpose(),mDepth_intrin);
+        CameraCalibration color_calib(tf_imu_color.transpose(),mColor_intrin);
+        CameraCalibration fish_calib(tf_imu_fish.inverse().transpose(),intr_fish);
+
+
+        slam_camera_calibs.push_back(fish_calib);
+        additional_camera_calibs.push_back(depth_calib);
+        additional_camera_calibs.push_back(color_calib);
+
         /*/ <- add/remove * after the first slash to toggle calibration code.
         // This prints camera/IMU intrinsics you can put in intr.y[a]ml
         rs::intrinsics fish_intr = mpDev->get_stream_intrinsics(rs::stream::fisheye);
@@ -166,13 +217,29 @@ namespace ark {
 
     }
 
+    void ZR300Camera::writeCalibration(std::string filename){
+        cv::FileStorage intr_file_ = cv::FileStorage(filename, cv::FileStorage::WRITE);
+        intr_file_ << "cameras" << slam_camera_calibs;
+        intr_file_ << "additional_cameras" << additional_camera_calibs;
+        intr_file_.release();
+
+    }
+
     ZR300Camera::~ZR300Camera() {
         // Stop the device
+        // Stop the motion tracker
+        fisheye_queue.clear();
+        rgb_queue.clear();
+        depth_queue.clear();
+        imu_queue.clear();
+        
+        printf("stopping ZR300\n");
         if (mpDev->is_streaming())
             mpDev->stop(rs::source::all_sources);
 
-        // Stop the motion tracker
+        printf("stopped ZR300\n");
         mpDev->disable_motion_tracking();
+
     }
 
     void ZR300Camera::update(MultiCameraFrame & frame) {

@@ -38,6 +38,46 @@ namespace ark {
 
             };
 
+
+            struct CameraCalibration{
+            private:
+                std::vector<int> dimensions;
+                std::vector<float> coeffs;
+                std::vector<float> focal;
+                std::vector<float> principal;
+                Eigen::Matrix4f transform;
+            public:
+                CameraCalibration(Eigen::Matrix4f transform, rs::intrinsics intr):
+                transform(transform)
+                {
+                    dimensions = {intr.width,intr.height};
+                    coeffs = {intr.coeffs[0], intr.coeffs[1], intr.coeffs[2], intr.coeffs[3]};
+                    focal = {intr.fx, intr.fy};
+                    principal = { intr.ppx, intr.ppy};
+                }
+
+                CameraCalibration(){}
+
+                void write(cv::FileStorage& fs) const                        //Write serialization for this class
+                {
+                    fs << "{";
+                    //std::cout << transform << std::endl;
+                    std::vector<float> t_sc(transform.data(), transform.data() + transform.rows() * transform.cols());
+                    fs << "T_SC" << t_sc;
+                    fs << "image_dimension" << dimensions;
+                    fs << "distortion_type" << "radialtangential";
+                    fs << "distortion_coefficients" << coeffs;
+                    fs << "focal_length" << focal;
+                    fs << "principal_point" << principal;
+                    fs << "}";
+                }
+
+                void read(const cv::FileNode& node)                          //Read serialization for this class
+                {
+                }
+
+            };
+
             /** @param require_motion if true, require motion module to be available */
             explicit ZR300Camera(bool require_motion = false);
 
@@ -88,6 +128,11 @@ namespace ark {
 
             const double getTimeStamp() const;
 
+            /**
+             * writes a camera calibration file to the specified filename should be .yaml
+             */
+            void writeCalibration(std::string filename);
+
         protected:
             void update(MultiCameraFrame & frame);
 
@@ -116,6 +161,8 @@ namespace ark {
             SingleConsumerPriorityQueue<FrameObject> depth_queue;
             SingleConsumerPriorityQueue<FrameObject> fisheye_queue;
             SingleConsumerPriorityQueue<FrameObject> rgb_queue;
+            std::vector<CameraCalibration> slam_camera_calibs;
+            std::vector<CameraCalibration> additional_camera_calibs;
             bool requireMotion;
     };
 }

@@ -24,8 +24,8 @@ set( SLAM_DEMO_NAME "SLAM_demo" )
 option( BUILD_DEMOS "BUILD_DEMOS" ON )
 option( BUILD_TESTS "BUILD_TESTS" OFF )
 option( BUILD_UNITY_PLUGIN "BUILD_UNITY_PLUGIN" ON ) # Windows only
-option( USE_REALSENSE2 "USE_REALSENSE2" ON ) 
-option( USE_REALSENSE "USE_REALSENSE" OFF ) 
+option( USE_REALSENSE2 "USE_REALSENSE2" OFF ) 
+option( USE_REALSENSE "USE_REALSENSE" ON ) 
 option( USE_RSSDK "USE_RSSDK" OFF ) 
 option( USE_PMDSDK "USE_PMDSDK" OFF ) 
 
@@ -50,6 +50,9 @@ set(Boost_USE_STATIC ON)
 
 # require PCL
 find_package( PCL REQUIRED )
+
+#require OpenGL
+find_package(OpenGL REQUIRED)
 
 # require OpenCV
 find_package( OpenCV REQUIRED )
@@ -146,6 +149,7 @@ set(
   ${EIGEN_LIBRARIES}
   ${REALSENSE_LIBRARIES} 
   ${REALSENSE2_LIBRARIES} 
+  ${OPENGL_LIBRARIES}
   ${OKVIS_LIBRARIES}
   ${DBoW2_LIBRARIES}
   ${GLOG_LIBRARIES}
@@ -178,6 +182,7 @@ set(
   Detector.cpp
   HandDetector.cpp
   PlaneDetector.cpp
+  glfwManager.cpp
 )
 
 set(
@@ -200,7 +205,36 @@ set(
   ${INCLUDE_DIR}/HandDetector.h
   ${INCLUDE_DIR}/Types.h
   ${INCLUDE_DIR}/PlaneDetector.h
+  ${INCLUDE_DIR}/glfwManager.h
 )
+
+if(WIN32)
+    add_subdirectory(third_party/glfw)
+    list(APPEND DEPENDENCIES glfw3)
+else()
+    # Find glfw header
+    find_path(GLFW_INCLUDE_DIR NAMES GLFW/glfw3.h
+        PATHS /usr/X11R6/include
+              /usr/include/X11
+              /opt/graphics/OpenGL/include
+              /opt/graphics/OpenGL/contrib/libglfw
+              /usr/local/include
+              /usr/include/GL
+              /usr/include
+    )
+    # Find glfw library
+    find_library(GLFW_LIBRARIES NAMES glfw glfw3
+            PATHS /usr/lib64
+                  /usr/lib
+                  /usr/lib/${CMAKE_LIBRARY_ARCHITECTURE}
+                  /usr/local/lib64
+                  /usr/local/lib
+                  /usr/local/lib/${CMAKE_LIBRARY_ARCHITECTURE}
+                  /usr/X11R6/lib
+    )
+    list(APPEND DEPENDENCIES m ${GLFW_LIBRARIES} ${LIBUSB1_LIBRARIES})
+    include_directories(${GLFW_INCLUDE_DIR})
+endif()
 
 if( NOT REALSENSE2_FOUND )
   set( _REALSENSE2_ "//" )

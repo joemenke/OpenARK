@@ -1,7 +1,6 @@
 #include "ZR300Camera.h"
-//#include <okvis/VioParametersReader.hpp>
-//#include <okvis/ThreadedKFVio.hpp>
 #include "OkvisSLAMSystem.h"
+#include "glfwManager.h"
 #include <iostream>
 
 using namespace ark;
@@ -9,16 +8,16 @@ using namespace ark;
 int main(int argc, char **argv)
 {
 
-    //if (argc != 2 && argc != 3) {
-    //    std::cerr << "Usage: ./" << argv[0] << " configuration-yaml-file [skip-first-seconds]";
-    //    return -1;
-    //}
+    if (argc != 4 && argc != 3 && argc !=2 ) {
+        std::cerr << "Usage: ./" << argv[0] << " configuration-yaml-file [vocabulary-file] [skip-first-seconds]";
+        return -1;
+    }
 
     google::InitGoogleLogging(argv[0]);
 
     okvis::Duration deltaT(0.0);
-    if (argc == 3) {
-        deltaT = okvis::Duration(atof(argv[2]));
+    if (argc == 4) {
+        deltaT = okvis::Duration(atof(argv[3]));
     }
 
     // read configuration file
@@ -26,88 +25,75 @@ int main(int argc, char **argv)
     if (argc > 1) configFilename = argv[1];
     else configFilename = "intr.yml";
 
-    OkvisSLAMSystem slam("ORBvoc.yml", configFilename);
+    std::string vocabFilename;
+    if (argc > 2) vocabFilename = argv[2];
+    else vocabFilename = "";
 
-    //okvis::VioParameters parameters;
-    //vio_parameters_reader.getParameters(parameters);
-
-    //okvis::ThreadedKFVio okvis_estimator(parameters, "ORBvoc.yml");
-
-    //okvis_estimator.setBlocking(false);
+    OkvisSLAMSystem slam(vocabFilename, configFilename);
 
     //setup display
-    // if (!MyGUI::Manager::init())
-    // {
-      // fprintf(stdout, "Failed to initialize GLFW\n");
-      // return -1;
-    // }
+    if (!MyGUI::Manager::init())
+    {
+       fprintf(stdout, "Failed to initialize GLFW\n");
+       return -1;
+     }
 
     printf("Camera initialization started...\n");
     ZR300Camera camera (true);
+    camera.writeCalibration("cameras.yaml");
 
     printf("Camera initialization complete\n");
     fflush(stdout);
 
-    //std::deque<cv::Point2f> pos;
-    //const int MAX_POS = 5000;
+    //Window for displaying the path
+    MyGUI::CameraWindow path_win("Path Viewer", 1024, 620);
+    MyGUI::ImageWindow img_win("Frame Viewer", 640,480, GL_LUMINANCE, GL_UNSIGNED_BYTE);
+    MyGUI::Path path1("path1", Eigen::Vector3d(1, 0, 0));
+    MyGUI::Axis axis1("axis1", 1);
+    MyGUI::Axis axis2("axis2", 1);
+    MyGUI::Grid grid1("grid1", 10, 1);
+    path_win.add_object(&path1);
+    path_win.add_object(&axis1);
+    path_win.add_object(&axis2);
+    path_win.add_object(&grid1);
 
-    //FrameAvailableHandler handler([& pos](MultiCameraFrame frame) {
-    //    if (frame.vecTcw.size() > 0) {
-    //        for (int i = 0; i < 3; ++i) {
-    //            std::cerr << frame.vecTcw[0].at<double>(i, 3) << " ";
-    //        }
-    //        std::cerr << "\n";
-    //    }
-    //});
-    //slam.AddFrameAvailableHandler(handler, "mapping");
+    FrameAvailableHandler handler([&path1, &axis2, &img_win](MultiCameraFrame frame) {
+        Eigen::Matrix4d eigen_Tcw;
+        cv::cv2eigen(frame.vecTcw[0],eigen_Tcw);
+        Eigen::Affine3d transform(eigen_Tcw.inverse());
+        path1.add_node(transform.translation());
+        axis2.set_transform(transform);
+        //std::cout << "new frame\n";
+        img_win.set_image(frame.images[0]);
+    });
+    slam.AddFrameAvailableHandler(handler, "mapping");
 
-    //Just a temp window for now
-    //MyGUI::CameraWindow path_win("Path Viewer", 1024, 620);
+
 
     //okvis::Time start(0.0);
     //okvis::Time t_imu(0.0); 
 
     //run until display is closed
-    while (true) { //MyGUI::Manager::running()){
+    while (MyGUI::Manager::running()){
       //Update the display
-      //MyGUI::Manager::update();
-      //okvis_estimator.display();
+        MyGUI::Manager::update();
 
-        //std::cout << "camera update started" << std::endl << std::flush; 
         camera.nextFrame();
-        //std::cout << "camera update complete" << std::endl << std::flush; 
-
-        //convert to okvis time. Note: rs time is in ms, okvis is in s
-        //okvis::Time t_image(camera.getTimeStamp()/1000.0);
-
-
-        //if (start == okvis::Time(0.0)) {
-        //  start = t_image;
-        //}
 
         cv::Mat fisheyeMap = camera.getFishEyeMap();
+        //get others, push to vector
 
         slam.PushIMU(camera.getImuData());
         slam.PushFrame(camera.getFishEyeMap(), camera.getTimeStamp());
-        /*for(size_t i=0; i<imuMap.size(); i++){
-            t_imu = okvis::Time(imuMap[i].timestamp/1000.0);
-            if (t_imu - start + okvis::Duration(1.0) > deltaT) {
-              okvis_estimator.addImuMeasurement(t_imu, imuMap.at(i).accel, imuMap.at(i).gyro);
-            }
-        }
 
-        // add the image to the frontend for (blocking) processing
-        if (t_image - start > deltaT) {
-            okvis_estimator.addImage(t_image, 0, fisheyeMap);
-        }
-        */
         slam.display();
         int k = cv::waitKey(1);
         if (k == 'q' || k == 'Q' || k == 27) break; // 27 is ESC
     }
-
+    printf("\nTerminate...\n");
     // Clean up
-    // MyGUI::Manager::terminate();
+    MyGUI::Manager::terminate();
+    slam.ShutDown();
     printf("\nExiting...\n");
     return 0;
 }

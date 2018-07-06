@@ -4,7 +4,7 @@
 namespace ark {
 
     OkvisSLAMSystem::OkvisSLAMSystem(const std::string & strVocFile, const std::string & strSettingsFile) :
-        start_(0.0), t_imu_(0.0), deltaT_(1.0), num_frames_(0) {
+        start_(0.0), t_imu_(0.0), deltaT_(1.0), num_frames_(0), kill(false) {
 
         okvis::VioParametersReader vio_parameters_reader;
         try {
@@ -29,6 +29,7 @@ namespace ark {
 
         auto state_callback = [this](const okvis::Time& timestamp, const okvis::kinematics::Transformation& T_WS) {
             state_queue_.enqueue({ T_WS,timestamp });
+            //std::cout << "state callback: " << timestamp << std::endl;
         };
 
         okvis_estimator_->setPathCallback(
@@ -55,6 +56,8 @@ namespace ark {
         while (true) {
             StampedPath path;
             while (!path_queue_.try_dequeue(&path)) {
+                if(kill)
+                    return;
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
             // get the most up to date frame
@@ -64,7 +67,7 @@ namespace ark {
                 if (!(frame_found = image_queue_.try_dequeue(&frame))) {
                     break;
                 }
-            } while (frame.timestamp == path.timestamp);
+            } while (frame.timestamp < path.timestamp);
             if (!frame_found)
                 continue;
             MultiCameraFrame out_frame;
@@ -115,16 +118,20 @@ namespace ark {
             //switch this to frame and then wait for state near frame
             StampedState state;
             while (!state_queue_.try_dequeue(&state)) {
+                if(kill)
+                    return;
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
             //get most up to date frame
             StampedImages frame;
             bool frame_found = false;
+            //std::cout << "sz: " << state_queue_.size() << std::endl;
             do {
                 if (!(frame_found = frame_queue_.try_dequeue(&frame))) {
                     break;
                 }
-            } while (frame.timestamp == state.timestamp);
+                //std::cout << "frame ts: " << frame.timestamp << " state ts: " << state.timestamp << "sz: " << frame_queue_.size() << std::endl; 
+            } while (frame.timestamp < state.timestamp);
             if (!frame_found)
                 continue;
             MultiCameraFrame out_frame;
@@ -191,8 +198,13 @@ namespace ark {
         if (t_image - start_ > deltaT_) {
             std::vector<cv::Mat> images;
             images.push_back(image);
-            image_queue_.enqueue({ images,t_image,num_frames_ });
-            frame_queue_.enqueue({ images,t_image,num_frames_ });
+            if(mMapKeyFrameAvailableHandler.size()>0){
+                image_queue_.enqueue({ images,t_image,num_frames_ });
+                std::cout << "enqueue: " << t_image << std::endl;
+            }
+            if(mMapFrameAvailableHandler.size()>0){
+                frame_queue_.enqueue({ images,t_image,num_frames_ });
+            }
             num_frames_++;
             okvis_estimator_->addImage(t_image, 0, image);
         }
@@ -229,14 +241,22 @@ namespace ark {
 
     void OkvisSLAMSystem::ShutDown()
     {
-        okvis_estimator_ = nullptr;
+        path_queue_.clear();
+        state_queue_.clear();
+        frame_queue_.clear();
+        image_queue_.clear();
+        kill=true;
         keyFrameConsumerThread_.join();
         frameConsumerThread_.join();
+        okvis_estimator_.reset();
     }
 
     OkvisSLAMSystem::~OkvisSLAMSystem() {
-        keyFrameConsumerThread_.join();
-        frameConsumerThread_.join();
+        path_queue_.clear();
+        state_queue_.clear();
+        frame_queue_.clear();
+        image_queue_.clear();
+        kill=true;
     }
 
     void OkvisSLAMSystem::RequestStop()

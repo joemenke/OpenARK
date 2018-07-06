@@ -402,14 +402,14 @@ namespace ark {
             int step = fill_in ? 1 : resolution;
             int multiplier = fill_in ? 1 : resolution;
 
-            cv::parallel_for_(cv::Range(0, R*C), [&](const cv::Range & range) {
+            /*cv::parallel_for_(cv::Range(0, R*C), [&](const cv::Range & range) {
                 for (int r = range.start; r < range.end; ++r) {
                     int i = r / C * multiplier, j = r % C * multiplier;
                     output_mat.ptr<Vec3f>(i)[j] =
                         util::normalAtPoint(xyz_map,
                             Point2i(j, i) * (resolution / step), normal_dist);
                 }
-            });
+            });*/
 
             if (fill_in) {
                 cv::resize(output_mat, output_mat, xyz_map.size());
